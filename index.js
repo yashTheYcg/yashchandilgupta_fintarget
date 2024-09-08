@@ -4,9 +4,12 @@ const dotenv = require('dotenv');
 const path = require('path');
 const Redis = require('ioredis');
 const fs = require('fs');
+const cluster = require('cluster');
+const os = require('os');
 
 dotenv.config({ path: path.join(__dirname, "./config.env") });
 
+const numCPUs = os.cpus().length; // Get the number of CPU cores
 const client = new Redis({
   host: process.env.REDIS_URL,
   port: process.env.REDIS_PORT,
@@ -32,9 +35,9 @@ async function processTasks() {
   while (true) {
     console.log("In the processTasks loop");
     try {
-      const taskString = await client.brpop('taskQueue',4); // Block until a task is available
+      const taskString = await client.brpop('taskQueue', 4); // Block until a task is available
       if (!taskString) {
-        console.log("No task available, waiting for 4 second...");
+        console.log("No task available, waiting for 4 seconds...");
         await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before checking again
         continue; // If no task is available, continue the loop
       }
@@ -99,8 +102,28 @@ app.post('/task', async (req, res) => {
   }
 });
 
-// Start processing tasks
-processTasks();
+// Start processing tasks in each worker
+if (cluster.isMaster) {
+  // Fork workers
+  for (let i = 0; i < 2; i++) {
+    cluster.fork();
+  }
+
+  cluster.on('exit', (worker, code, signal) => {
+    console.log(`Worker ${worker.process.pid} died with code ${code} and signal ${signal}`);
+    // Optionally, you can fork a new worker to replace the dead one
+    cluster.fork();
+  });
+} else {
+  // Start processing tasks in worker processes
+  processTasks();
+  
+  // Start the server in each worker
+  const server = http.createServer(app);
+  server.listen(3000, () => {
+    console.log(`Worker ${process.pid} listening on port 3000`);
+  });
+}
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
@@ -108,9 +131,4 @@ process.on('SIGINT', async () => {
   await client.quit();
   console.log('Redis client closed');
   process.exit(0);
-});
-
-const server = http.createServer(app);
-server.listen(3000, () => {
-  console.log('Server listening on port 3000');
 });
