@@ -67,7 +67,7 @@ async function processTasks() {
   }
 }
 
-app.post('/task', async (req, res) => {
+app.post('/api/v1/task', async (req, res) => {
   const userId = req.body.userId;
   const key = `user:${userId}:rateLimit`;
 
